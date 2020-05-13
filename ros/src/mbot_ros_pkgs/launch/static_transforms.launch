@@ -1,0 +1,4 @@
+<launch>
+]	<!--node pkg="tf" type="static_transform_publisher" name="base_link_pub" args="0 0 0 1.57 0 3.14 Surrogate/odom_local_ned base_link 100" /> -->
+	<node pkg="tf" type="static_transform_publisher" name="base_link_pub" args="-1.2 0 0.3 0 0 0 Surrogate/base_link Surrogate/rear_axle 100" />
+</launch>
