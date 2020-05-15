@@ -35,6 +35,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_srvs
   tf2
   tf2_ros
+  mbot_base
 )
 
 generate_messages(

@@ -20,6 +20,7 @@ public:
     MbotSim();
 
     void start();
+
 private:
     struct Vehicle {
         std::string name;
@@ -29,11 +30,6 @@ private:
         ros::Publisher odom_pub;
         ros::Publisher imu_pub;
         std::string imu_name;
-    };
-
-    struct Actor {
-        std::string name;
-        ros::Publisher pose_pub;
     };
 
     void connectToAirSim();
@@ -65,15 +61,18 @@ private:
     AirSimSettingsParser settings_parser_;
     ros::NodeHandle nh_;
     std::vector<Vehicle> vehicles_;
-    std::vector<Actor> actors_;
+    std::vector<std::string> actors_;
     tf2_ros::StaticTransformBroadcaster static_tf_pub_;
     tf2_ros::TransformBroadcaster tf_broadcaster_;
 
     ros::Timer vehicle_update_timer_;
     ros::Timer ground_truth_update_timer_;
+    ros::Publisher tracked_objects_pub_;
 
     std::shared_ptr<msr::airlib::CarRpcLibClient> airsim_client_;
     std::mutex client_mutex_;
+
+    Eigen::Vector3d initial_position_;
 
     NwuTransform nwu_transform_;
 };

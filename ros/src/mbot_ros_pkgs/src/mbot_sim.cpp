@@ -2,6 +2,8 @@
 #include "mbot_sim.h"
 #include <sensor_msgs/Imu.h>
 #include <nav_msgs/Odometry.h>
+#include <mbot_base/TrackedObject.h>
+#include <mbot_base/TrackedObjectArray.h>
 #include <tf2_eigen/tf2_eigen.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/LinearMath/Quaternion.h>
@@ -10,6 +12,7 @@
 #include "math_common.h"
 #include "airsim_client_factory.h"
 
+static std::string world_frame = "world";
 static std::string base_link_frame = "base_link";
 static std::string base_link_ned_frame = "base_link_ned";
 
@@ -24,13 +27,9 @@ void MbotSim::start() {
     parseSettings();
 
     // Get all actors we care to track in the scene
-    auto actor_names = airsim_client_->simListSceneObjects("(Pedestrian|Vehicle)_.*");
-    for (auto actor_name : actor_names) {
-        Actor actor;
-        actor.name = actor_name;
-        actor.pose_pub = nh_.advertise<geometry_msgs::PoseStamped>(actor_name + "/pose", 1);
-        actors_.push_back(actor);
-    }
+    actors_ = airsim_client_->simListSceneObjects("(Pedestrian|Vehicle)_.*");
+
+    tracked_objects_pub_ = nh_.advertise<mbot_base::TrackedObjectArray>("tracked_objects", 1);
 
     // Begin updating vehicles periodically
     double update_airsim_control_every_n_sec;
@@ -55,6 +54,11 @@ void MbotSim::parseSettings() {
         // Create our vehicle wrapper
         Vehicle vehicle;
         vehicle.name = vehicle_name;
+
+        if (vehicles_.empty()) {
+            // Set initial position from first vehicle
+            initial_position_ = nwu_transform_.toNwu(vehicle_setting->position.cast<double>());
+        }
 
         for (auto& camera : vehicle_setting->cameras)
         {
@@ -127,22 +131,60 @@ void MbotSim::parseSettings() {
 }
 
 void MbotSim::doGroundTruthCallback(const ros::TimerEvent&) {
+    mbot_base::TrackedObjectArray tracks;
+    tracks.header.stamp = ros::Time::now();
+    tracks.header.frame_id = world_frame;
+
     for (auto& actor : actors_) {
         client_mutex_.lock();
-        auto pose = airsim_client_->simGetObjectPose(actor.name);
+        auto pose = airsim_client_->simGetObjectPose(actor);
         client_mutex_.unlock();
 
-        // Pose is in NED so transform to NWU
-        Eigen::Isometry3d nwu_pose;
-        nwu_pose = nwu_transform_.toNwu(pose.orientation.cast<double>());
-        nwu_pose.translation() = nwu_transform_.toNwu(pose.position.cast<double>());
+        // Convert to NED to NWU
+        Eigen::Vector3d position = nwu_transform_.toNwu(pose.position.cast<double>());
+        Eigen::Quaterniond orientation = nwu_transform_.toNwu(pose.orientation.cast<double>());
 
-        // Publish the pose
-        geometry_msgs::PoseStamped pose_msg;
-        pose_msg.header.stamp = ros::Time::now();
-        pose_msg.pose = tf2::toMsg(nwu_pose);
-        actor.pose_pub.publish(pose_msg);
+        mbot_base::TrackedObject track;
+        track.header.stamp = ros::Time::now();
+        track.header.frame_id = world_frame;
+        track.id = std::hash<std::string>{}(actor);
+        track.position.x = position.x();
+        track.position.y = position.y();
+        track.position.z = position.z();
+        track.velocity.x = 0.0;
+        track.velocity.y = 0.0;
+        track.velocity.z = 0.0;
+        track.yaw_rate = 0.0;
+        track.orientation = 0.0;
+        track.orientation_known = false;
+
+        if (actor.find("Pedestrian_") == 0) {
+            track.classification = "pedestrian";
+            track.radius = 0.25;
+        }
+        else {
+            track.classification = "vehicle";
+            track.radius = 1.5;
+        }
+
+        track.shape.height = 2.0;
+
+        // TODO This should be using geometry utils in marble_structs
+        const int SHAPE_POINTS = 24;
+        for (int i = 0; i < SHAPE_POINTS; ++i) {
+            double theta = 2 * M_PI * i / SHAPE_POINTS;
+
+            geometry_msgs::Point ros_pt;
+            ros_pt.x = track.position.x + track.radius * cos(theta);
+            ros_pt.y = track.position.y + track.radius * sin(theta);
+            ros_pt.z = track.position.z;
+            track.shape.footprint.push_back(ros_pt);
+        }
+
+        tracks.tracks.push_back(track);
     }
+
+    tracked_objects_pub_.publish(tracks);
 }
 
 void MbotSim::doControlCallback(const ros::TimerEvent&) {
@@ -154,6 +196,7 @@ void MbotSim::doControlCallback(const ros::TimerEvent&) {
 
             updateOdometry(vehicle, state);
             updateImu(vehicle);
+
             // TODO send velocity commands to AirSim
         }
         catch (rpc::rpc_error& e)
@@ -187,9 +230,20 @@ void MbotSim::updateOdometry(Vehicle& vehicle, const msr::airlib::CarApiBase::Ca
     odom_tf.header.frame_id = vehicle.name + "/rear_axle";
     odom_tf.child_frame_id = vehicle.name + "/odom";
     // Invert the pose because the TF is from rear_axle to odom
-    pose = pose.inverse();
-    odom_tf.transform = tf2::eigenToTransform(pose).transform;
+    odom_tf.transform = tf2::eigenToTransform(pose.inverse()).transform;
     tf_broadcaster_.sendTransform(odom_tf);
+
+    // Compute world pose
+    Eigen::Isometry3d world_pose = pose;
+    pose.translation() -= initial_position_;
+
+    // Publish world transform to vehicle
+    geometry_msgs::TransformStamped world_tf;
+    world_tf.header = odom_msg.header;
+    world_tf.header.frame_id = world_frame;
+    world_tf.child_frame_id = vehicle.name + "/" + base_link_frame;
+    world_tf.transform = tf2::eigenToTransform(world_pose).transform;
+    tf_broadcaster_.sendTransform(world_tf);
 }
 
 void MbotSim::updateImu(Vehicle& vehicle) {
