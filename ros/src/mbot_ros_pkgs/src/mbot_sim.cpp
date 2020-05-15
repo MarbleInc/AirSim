@@ -138,11 +138,13 @@ void MbotSim::doGroundTruthCallback(const ros::TimerEvent&) {
     for (auto& actor : actors_) {
         client_mutex_.lock();
         auto pose = airsim_client_->simGetObjectPose(actor);
+        auto twist = airsim_client_->simGetObjectTwist(actor);
         client_mutex_.unlock();
 
         // Convert to NED to NWU
         Eigen::Vector3d position = nwu_transform_.toNwu(pose.position.cast<double>());
         Eigen::Quaterniond orientation = nwu_transform_.toNwu(pose.orientation.cast<double>());
+        Eigen::Vector3d velocity = nwu_transform_.toNwu(twist.linear.cast<double>());
 
         mbot_base::TrackedObject track;
         track.header.stamp = ros::Time::now();
@@ -151,12 +153,12 @@ void MbotSim::doGroundTruthCallback(const ros::TimerEvent&) {
         track.position.x = position.x();
         track.position.y = position.y();
         track.position.z = position.z();
-        track.velocity.x = 0.0;
-        track.velocity.y = 0.0;
-        track.velocity.z = 0.0;
-        track.yaw_rate = 0.0;
-        track.orientation = 0.0;
-        track.orientation_known = false;
+        track.velocity.x = velocity.x();
+        track.velocity.y = velocity.y();
+        track.velocity.z = velocity.z();
+        track.yaw_rate = -twist.angular.z();
+        track.orientation = orientation.toRotationMatrix().eulerAngles(2, 1, 0)[0];
+        track.orientation_known = true;
 
         if (actor.find("Pedestrian_") == 0) {
             track.classification = "pedestrian";
