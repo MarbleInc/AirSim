@@ -10,10 +10,10 @@ bool AirSimSettingsParser::success()
     return success_;
 }
 
-bool AirSimSettingsParser::readSettingsTextFromFile(std::string settingsFilepath, std::string& settingsText) 
+bool AirSimSettingsParser::readSettingsTextFromFile(std::string settingsFilepath, std::string& settingsText)
 {
     // check if path exists
-    bool found = std::ifstream(settingsFilepath.c_str()).good(); 
+    bool found = std::ifstream(settingsFilepath.c_str()).good();
     if (found)
     {
         std::ifstream ifs(settingsFilepath);
@@ -26,7 +26,7 @@ bool AirSimSettingsParser::readSettingsTextFromFile(std::string settingsFilepath
     return found;
 }
 
-bool AirSimSettingsParser::getSettingsText(std::string& settingsText) 
+bool AirSimSettingsParser::getSettingsText(std::string& settingsText)
 {
     bool success = readSettingsTextFromFile(msr::airlib::Settings::Settings::getUserDirectoryFullPath("settings.json"), settingsText);
     return success;
@@ -48,12 +48,11 @@ bool AirSimSettingsParser::initializeSettings()
         // not sure where settings_json initialized in AirSimSettings::initializeSettings() is actually used
         Settings& settings_json = Settings::loadJSonString(settingsText_);
         std::string simmode_name = settings_json.getString("SimMode", "");
-        std::cout << "simmode_name: " << simmode_name << std::endl; 
+        std::cout << "simmode_name: " << simmode_name << std::endl;
 
         AirSimSettings::singleton().load(std::bind(&AirSimSettingsParser::getSimMode, this));
+        return true;
     }
-    else
-    {
-        return false;
-    }
+
+    return false;
 }
