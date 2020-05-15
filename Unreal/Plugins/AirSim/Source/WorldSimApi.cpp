@@ -18,7 +18,7 @@ bool WorldSimApi::isPaused() const
 void WorldSimApi::reset()
 {
     UAirBlueprintLib::RunCommandOnGameThread([this]() {
-        simmode_->reset(); 
+        simmode_->reset();
         }, true);
 }
 
@@ -90,7 +90,7 @@ bool WorldSimApi::setObjectPose(const std::string& object_name, const WorldSimAp
         FTransform actor_transform = simmode_->getGlobalNedTransform().fromGlobalNed(pose);
         AActor* actor = UAirBlueprintLib::FindActor<AActor>(simmode_, FString(object_name.c_str()));
         if (actor) {
-            if (teleport) 
+            if (teleport)
                 result = actor->SetActorLocationAndRotation(actor_transform.GetLocation(), actor_transform.GetRotation(), false, nullptr, ETeleportType::TeleportPhysics);
             else
                 result = actor->SetActorLocationAndRotation(actor_transform.GetLocation(), actor_transform.GetRotation(), true);
@@ -99,6 +99,27 @@ bool WorldSimApi::setObjectPose(const std::string& object_name, const WorldSimAp
             result = false;
     }, true);
     return result;
+}
+
+WorldSimApi::Twist WorldSimApi::getObjectTwist(const std::string& object_name) const {
+    // TODO might be more efficient to do this in the same query for an object's pose
+    WorldSimApi::Twist twist;
+    twist.linear = Vector3r::Zero();
+    twist.angular = Vector3r::Zero();
+    UAirBlueprintLib::RunCommandOnGameThread([this, &object_name, &twist]() {
+        AActor* actor = UAirBlueprintLib::FindActor<AActor>(simmode_, FString(object_name.c_str()));
+        if (actor) {
+            std::vector<UPrimitiveComponent*> physics_components = UAirBlueprintLib::getPhysicsComponents(actor);
+            if (physics_components.size() > 0) {
+                // Use None for the root component velocities
+                FVector linear_vel = physics_components[0]->GetPhysicsLinearVelocity("None");
+                FVector angular_vel = physics_components[0]->GetPhysicsAngularVelocity("None");
+                twist.linear = simmode_->getGlobalNedTransform().toLocalNedVelocity(linear_vel);
+                twist.angular = simmode_->getGlobalNedTransform().toLocalNedVelocity(angular_vel);
+            }
+        }
+    }, true);
+    return twist;
 }
 
 void WorldSimApi::enableWeather(bool enable)
@@ -142,7 +163,7 @@ std::unique_ptr<std::vector<std::string>> WorldSimApi::swapTextures(const std::s
 				if (invalidChoice)
 					break;
 			}
-			
+
 			if (invalidChoice)
 				continue;
 			dynamic_cast<ATextureShuffleActor*>(shuffler)->SwapTexture(tex_id, component_id, material_id);
