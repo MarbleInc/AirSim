@@ -12,11 +12,12 @@ Lidar::Lidar(
   : Sensor(nh, update_interval)
   , vehicle_name_(vehicle_name)
   , sensor_name_(sensor_name)
-  , lidar_pub_(nh.advertise<sensor_msgs::PointCloud2>(vehicle_name + "/lidar/" + sensor_name, 10)) {
+  , lidar_pub_(nh.advertise<sensor_msgs::PointCloud2>(vehicle_name + "/lidar/" + sensor_name, 10))
+  , airsim_client_(AirSimClientFactory::instance()->getClient()) {
 }
 
 void Lidar::update() {
-  auto lidar_data = getAirSimClient()->getLidarData(sensor_name_, vehicle_name_);
+  auto lidar_data = airsim_client_->getLidarData(sensor_name_, vehicle_name_);
   sensor_msgs::PointCloud2 lidar_msg = convertToPointCloud(lidar_data);
   lidar_pub_.publish(lidar_msg);
 }
@@ -28,7 +29,7 @@ sensor_msgs::PointCloud2 Lidar::convertToPointCloud(const msr::airlib::LidarData
 {
     sensor_msgs::PointCloud2 lidar_msg;
     lidar_msg.header.frame_id = sensor_name_;
-    lidar_msg.header.stamp = ros::Time::now();
+    lidar_msg.header.stamp = ros::Time(lidar_data.time_stamp / 1e9);
 
     if (lidar_data.point_cloud.size() > 3)
     {

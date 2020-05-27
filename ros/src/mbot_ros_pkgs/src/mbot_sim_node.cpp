@@ -4,11 +4,14 @@
 
 int main(int argc, char** argv) {
     ros::init(argc, argv, "mbot_sim_node");
-    ros::MultiThreadedSpinner spinner(20);
 
     MbotSim mbot_sim;
     mbot_sim.start();
-    spinner.spin();
+
+    while (ros::ok()) {
+        // Blocks for step duration
+        mbot_sim.step(0.01);
+    }
 
     return 0;
 }

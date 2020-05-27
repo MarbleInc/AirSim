@@ -68,7 +68,7 @@ add_executable(mbot_sim_node
     src/gps.cpp
     src/sensor.cpp
     src/lidar.cpp
-    src/camera.cpp
+    src/capture_devices.cpp
     src/airsim_client_factory.cpp
     src/mbot_sim.cpp
     src/mbot_sim_node.cpp

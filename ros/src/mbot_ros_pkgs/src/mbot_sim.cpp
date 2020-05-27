@@ -2,6 +2,7 @@
 #include "mbot_sim.h"
 #include <sensor_msgs/Imu.h>
 #include <nav_msgs/Odometry.h>
+#include <rosgraph_msgs/Clock.h>
 #include <mbot_base/TrackedObject.h>
 #include <mbot_base/TrackedObjectArray.h>
 #include <tf2_eigen/tf2_eigen.h>
@@ -23,6 +24,9 @@ MbotSim::MbotSim()
 }
 
 void MbotSim::start() {
+    // Pause the simulation -- it will be stepped
+    airsim_client_->simPause(true);
+
     // Parse settings and construct vehicle and sensor wrappers
     parseSettings();
 
@@ -30,16 +34,45 @@ void MbotSim::start() {
     actors_ = airsim_client_->simListSceneObjects("(Pedestrian|Vehicle)_.*");
 
     tracked_objects_pub_ = nh_.advertise<mbot_base::TrackedObjectArray>("tracked_objects", 1);
+    clock_pub_ = nh_.advertise<rosgraph_msgs::Clock>("/clock", 10);
+}
 
-    // Begin updating vehicles periodically
-    double update_airsim_control_every_n_sec;
-    nh_.getParam("update_airsim_control_every_n_sec", update_airsim_control_every_n_sec);
-    vehicle_update_timer_ = nh_.createTimer(ros::Duration(update_airsim_control_every_n_sec), &MbotSim::doControlCallback, this);
+void MbotSim::step(double step_time) {
+  double timestamp;
+  for (auto& vehicle : vehicles_) {
+      try {
+          auto state = airsim_client_->getCarState(vehicle.name);
 
-    // Begin updating ground truth poses periodically
-    double update_airsim_ground_truth_every_n_sec;
-    nh_.getParam("update_airsim_ground_truth_every_n_sec", update_airsim_ground_truth_every_n_sec);
-    ground_truth_update_timer_ = nh_.createTimer(ros::Duration(update_airsim_ground_truth_every_n_sec), &MbotSim::doGroundTruthCallback, this);
+          // Publish unreal clock
+          timestamp = (state.timestamp) / 1e9; // nanoseconds to seconds
+          rosgraph_msgs::Clock clock_msg;
+          clock_msg.clock = ros::Time(timestamp);
+          clock_pub_.publish(clock_msg);
+
+          updateOdometry(vehicle, state);
+          updateImu(vehicle);
+
+          for (auto& sensor : vehicle.sensors) {
+              sensor->tick(timestamp);
+          }
+
+          //updateGroundTruth();
+
+          // TODO send velocity commands to AirSim
+      }
+      catch (rpc::rpc_error& e)
+      {
+          std::string msg = e.get_error().as<std::string>();
+          std::cout << "Exception raised by the API:" << std::endl << msg << std::endl;
+      }
+  }
+
+  for (auto& static_tf : static_tfs_) {
+      static_tf.header.stamp = ros::Time(timestamp) + ros::Duration(step_time);
+      tf_broadcaster_.sendTransform(static_tf);
+  }
+
+  airsim_client_->simContinueForTime(step_time);
 }
 
 void MbotSim::parseSettings() {
@@ -60,6 +93,11 @@ void MbotSim::parseSettings() {
             initial_position_ = nwu_transform_.toNwu(vehicle_setting->position.cast<double>());
         }
 
+        double update_img_response_every_n_sec;
+        nh_.getParam("update_img_response_every_n_sec", update_img_response_every_n_sec);
+        auto capture_devices =
+          std::make_shared<CaptureDevices>(nh_, image_transporter, vehicle_name, update_img_response_every_n_sec);
+
         for (auto& camera : vehicle_setting->cameras)
         {
             auto& camera_name = camera.first;
@@ -72,15 +110,13 @@ void MbotSim::parseSettings() {
                 // Skip capture settings that are missing a FOV setting
                 if (!std::isnan(capture_setting.fov_degrees)) {
                     std::cout << "Adding camera " << camera_name << std::endl;
-                    double update_img_response_every_n_sec;
-                    nh_.getParam("update_img_response_every_n_sec", update_img_response_every_n_sec);
-                    vehicle.cameras.push_back(
-                      std::make_shared<Camera>(
-                        nh_, image_transporter, vehicle_name, camera_name, capture_setting, update_img_response_every_n_sec));
+                    capture_devices->addCamera(camera_name, capture_setting);
                     addCameraStaticTf(vehicle_name, camera_name, camera_setting);
                 }
             }
         }
+
+        vehicle.sensors.push_back(capture_devices);
 
         for (auto& sensor : vehicle_setting->sensors) {
             auto& sensor_name = sensor.first;
@@ -90,16 +126,16 @@ void MbotSim::parseSettings() {
                 std::cout << "Adding lidar named: " << sensor_name << std::endl;
                 double update_lidar_every_n_sec;
                 nh_.getParam("update_lidar_every_n_sec", update_lidar_every_n_sec);
-                vehicle.lidars.push_back(std::make_shared<Lidar>(nh_, vehicle_name, sensor_name, update_lidar_every_n_sec));
+                vehicle.sensors.push_back(std::make_shared<Lidar>(nh_, vehicle_name, sensor_name, update_lidar_every_n_sec));
                 auto lidar_setting = *static_cast<msr::airlib::AirSimSettings::LidarSetting*>(sensor_setting.get());
                 auto static_tf = getSensorStaticTf(vehicle_name, sensor_name, lidar_setting.position, lidar_setting.rotation);
-                static_tf_pub_.sendTransform(static_tf);
+                static_tfs_.push_back(static_tf);
             }
-            else if (sensor_setting->sensor_type == SensorBase::SensorType::Gps && !vehicle.gps) {
+            else if (sensor_setting->sensor_type == SensorBase::SensorType::Gps) {
                 std::cout << "Adding GPS named: " << sensor_name << std::endl;
                 double update_gps_every_n_sec;
                 nh_.getParam("update_gps_every_n_sec", update_gps_every_n_sec);
-                vehicle.gps = std::make_shared<Gps>(nh_, vehicle_name, sensor_name, update_gps_every_n_sec);
+                vehicle.sensors.push_back(std::make_shared<Gps>(nh_, vehicle_name, sensor_name, update_gps_every_n_sec));
             }
             else if (sensor_setting->sensor_type == SensorBase::SensorType::Imu) {
                 std::cout << "Adding IMU named: " << sensor_name << std::endl;
@@ -107,7 +143,7 @@ void MbotSim::parseSettings() {
                 vehicle.imu_pub = nh_.advertise<sensor_msgs::Imu>(vehicle_name + "/imu", 10);
                 // The IMU has no position so assume it sits at base link with no RPY
                 auto static_tf = getSensorStaticTf(vehicle_name, sensor_name, {0, 0, 0}, {0, 0, 0}, false);
-                static_tf_pub_.sendTransform(static_tf);
+                static_tfs_.push_back(static_tf);
             }
         }
 
@@ -124,13 +160,13 @@ void MbotSim::parseSettings() {
         local_nwu_tf.transform.rotation.y = quat.y();
         local_nwu_tf.transform.rotation.z = quat.z();
         local_nwu_tf.transform.rotation.w = quat.w();
-        static_tf_pub_.sendTransform(local_nwu_tf);
+        static_tfs_.push_back(local_nwu_tf);
 
         vehicles_.push_back(vehicle);
     }
 }
 
-void MbotSim::doGroundTruthCallback(const ros::TimerEvent&) {
+void MbotSim::updateGroundTruth() {
     mbot_base::TrackedObjectArray tracks;
     tracks.header.stamp = ros::Time::now();
     tracks.header.frame_id = world_frame;
@@ -189,26 +225,6 @@ void MbotSim::doGroundTruthCallback(const ros::TimerEvent&) {
     tracked_objects_pub_.publish(tracks);
 }
 
-void MbotSim::doControlCallback(const ros::TimerEvent&) {
-    for (auto& vehicle : vehicles_) {
-        try {
-            client_mutex_.lock();
-            auto state = airsim_client_->getCarState(vehicle.name);
-            client_mutex_.unlock();
-
-            updateOdometry(vehicle, state);
-            updateImu(vehicle);
-
-            // TODO send velocity commands to AirSim
-        }
-        catch (rpc::rpc_error& e)
-        {
-            std::string msg = e.get_error().as<std::string>();
-            std::cout << "Exception raised by the API:" << std::endl << msg << std::endl;
-        }
-    }
-}
-
 void MbotSim::updateOdometry(Vehicle& vehicle, const msr::airlib::CarApiBase::CarState& state) {
     auto& position = state.kinematics_estimated.pose.position;
     auto& orientation = state.kinematics_estimated.pose.orientation;
@@ -219,7 +235,7 @@ void MbotSim::updateOdometry(Vehicle& vehicle, const msr::airlib::CarApiBase::Ca
     pose.translation() = nwu_transform_.toNwu(position.cast<double>());
 
     nav_msgs::Odometry odom_msg;
-    odom_msg.header.stamp = ros::Time::now();
+    odom_msg.header.stamp = ros::Time(state.timestamp / 1e9);
     odom_msg.header.frame_id = vehicle.name + "/odom";
     odom_msg.child_frame_id = vehicle.name + "/rear_axle";
     odom_msg.pose.pose = tf2::toMsg(pose);
@@ -258,7 +274,7 @@ void MbotSim::updateImu(Vehicle& vehicle) {
 
     sensor_msgs::Imu imu_msg;
     imu_msg.header.frame_id = vehicle.imu_name;
-    imu_msg.header.stamp = ros::Time::now();
+    imu_msg.header.stamp = ros::Time(imu_data.time_stamp / 1e9);
     imu_msg.orientation.x = orientation.x();
     imu_msg.orientation.y = orientation.y();
     imu_msg.orientation.z = orientation.z();
@@ -290,7 +306,6 @@ geometry_msgs::TransformStamped MbotSim::getSensorStaticTf(
   bool is_ned) {
 
     geometry_msgs::TransformStamped static_tf;
-    static_tf.header.stamp = ros::Time::now();
     if (is_ned) {
         static_tf.header.frame_id = vehicle_name + "/" + base_link_ned_frame;
     }
@@ -342,7 +357,6 @@ void MbotSim::addCameraStaticTf(
     auto static_tf_body = getSensorStaticTf(vehicle_name, camera_name + "_body", setting.position, setting.rotation);
 
     geometry_msgs::TransformStamped static_tf_optical = static_tf_body;
-    static_tf_optical.header.stamp = ros::Time::now();
     static_tf_optical.child_frame_id = camera_name + "_optical";
 
     tf2::Quaternion quat_cam_body;
@@ -357,6 +371,6 @@ void MbotSim::addCameraStaticTf(
     quat_cam_optical.normalize();
     tf2::convert(quat_cam_optical, static_tf_optical.transform.rotation);
 
-    static_tf_pub_.sendTransform(static_tf_body);
-    static_tf_pub_.sendTransform(static_tf_optical);
+    static_tfs_.push_back(static_tf_body);
+    static_tfs_.push_back(static_tf_optical);
 }
