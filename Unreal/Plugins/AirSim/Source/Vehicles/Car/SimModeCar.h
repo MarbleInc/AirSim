@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 
-#include "SimMode/SimModeBase.h"
+#include "SimMode/SimModeWorldBase.h"
 #include "CarPawn.h"
 #include "common/Common.hpp"
 #include "api/VehicleSimApiBase.hpp"
@@ -10,17 +10,13 @@
 
 
 UCLASS()
-class AIRSIM_API ASimModeCar : public ASimModeBase
+class AIRSIM_API ASimModeCar : public ASimModeWorldBase
 {
     GENERATED_BODY()
 
 public:
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaSeconds) override;
-
-    virtual bool isPaused() const override;
-    virtual void pause(bool is_paused) override;
-    virtual void continueForTime(double seconds) override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
     typedef msr::airlib::ClockFactory ClockFactory;
@@ -31,9 +27,6 @@ private:
     typedef msr::airlib::VehicleSimApiBase VehicleSimApiBase;
     typedef msr::airlib::VectorMath VectorMath;
     typedef msr::airlib::Vector3r Vector3r;
-
-private:
-    void initializePauseState();
 
 protected:
     virtual void setupClockSpeed() override;
