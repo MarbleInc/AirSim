@@ -3,8 +3,10 @@
 #include <sensor_msgs/Imu.h>
 #include <nav_msgs/Odometry.h>
 #include <rosgraph_msgs/Clock.h>
+/*
 #include <mbot_base/TrackedObject.h>
 #include <mbot_base/TrackedObjectArray.h>
+*/
 #include <tf2_eigen/tf2_eigen.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/LinearMath/Quaternion.h>
@@ -33,11 +35,12 @@ void MbotSim::start() {
     // Get all actors we care to track in the scene
     actors_ = airsim_client_->simListSceneObjects("(Pedestrian|Vehicle)_.*");
 
-    tracked_objects_pub_ = nh_.advertise<mbot_base::TrackedObjectArray>("tracked_objects", 1);
+    //tracked_objects_pub_ = nh_.advertise<mbot_base::TrackedObjectArray>("tracked_objects", 1);
     clock_pub_ = nh_.advertise<rosgraph_msgs::Clock>("/clock", 10);
 }
 
 void MbotSim::step(double step_time) {
+  static double prev_time = 0.0;
   double timestamp;
   for (auto& vehicle : vehicles_) {
       try {
@@ -53,7 +56,7 @@ void MbotSim::step(double step_time) {
           updateImu(vehicle);
 
           for (auto& sensor : vehicle.sensors) {
-              sensor->tick(timestamp);
+             sensor->tick(timestamp);
           }
 
           //updateGroundTruth();
@@ -72,7 +75,12 @@ void MbotSim::step(double step_time) {
       tf_broadcaster_.sendTransform(static_tf);
   }
 
+  auto start = std::chrono::steady_clock::now();
   airsim_client_->simContinueForTime(step_time);
+  auto end = std::chrono::steady_clock::now();
+  std::chrono::duration<double> elapsed_seconds = end-start;
+   std::cout << "continued for time: " << elapsed_seconds.count() << "s\n";
+   //airsim_client_->simPause(true);
 }
 
 void MbotSim::parseSettings() {
@@ -166,6 +174,7 @@ void MbotSim::parseSettings() {
     }
 }
 
+/*
 void MbotSim::updateGroundTruth() {
     mbot_base::TrackedObjectArray tracks;
     tracks.header.stamp = ros::Time::now();
@@ -224,6 +233,7 @@ void MbotSim::updateGroundTruth() {
 
     tracked_objects_pub_.publish(tracks);
 }
+*/
 
 void MbotSim::updateOdometry(Vehicle& vehicle, const msr::airlib::CarApiBase::CarState& state) {
     auto& position = state.kinematics_estimated.pose.position;
