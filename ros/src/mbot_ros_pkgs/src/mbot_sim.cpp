@@ -38,14 +38,15 @@ void MbotSim::start() {
 void MbotSim::start_recording_ground_truth(const std_msgs::Bool::ConstPtr& status){
     if(status->data && !recording_ground_truth_data){
         // start recording ground truth data
+        std::cout<<"Starting to write ground truth data"<<std::endl;
         recording_ground_truth_data = true;
     }
     else if(recording_ground_truth_data){
         // stop recording ground truth data and write to disk
         recording_ground_truth_data = false;
-        vector<shared_ptr<mbot_base::TrackedObjectArray>> arr = getTrackedObjectArray();
+        vector<shared_ptr<mbot_base::TrackedObjectArray>> arr = getTrackedObjectArray();  
+        std::cout<<"Ending writing ground truth data, "<< arr.size()<< " timestamps recorded"<<std::endl;
 
-        
     }
 }
 
@@ -236,6 +237,7 @@ void MbotSim::updateGroundTruth(double timestamp) {
     }
 
     if(recording_ground_truth_data){
+        std::cout<<"TrackedObjectArray for this timestamp pushed back"<<std::endl;
         array_to_publish.push_back(tracks);
     }
 

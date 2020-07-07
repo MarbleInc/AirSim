@@ -4,9 +4,6 @@
 #include "mbot_sim.h"
 
 
-
-
-
 int main(int argc, char** argv) {
     ros::init(argc, argv, "mbot_sim_node");
     MbotSim mbot_sim;
