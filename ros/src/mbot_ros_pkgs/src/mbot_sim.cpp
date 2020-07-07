@@ -1,10 +1,7 @@
-
 #include "mbot_sim.h"
 #include <sensor_msgs/Imu.h>
 #include <nav_msgs/Odometry.h>
 #include <rosgraph_msgs/Clock.h>
-#include <mbot_base/TrackedObject.h>
-#include <mbot_base/TrackedObjectArray.h>
 #include <tf2_eigen/tf2_eigen.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/LinearMath/Quaternion.h>
@@ -56,7 +53,7 @@ void MbotSim::step(double step_time) {
               sensor->tick(timestamp);
           }
 
-          //updateGroundTruth();
+          updateGroundTruth(timestamp);
 
           // TODO send velocity commands to AirSim
       }
@@ -166,10 +163,11 @@ void MbotSim::parseSettings() {
     }
 }
 
-void MbotSim::updateGroundTruth() {
-    mbot_base::TrackedObjectArray tracks;
-    tracks.header.stamp = ros::Time::now();
-    tracks.header.frame_id = world_frame;
+void MbotSim::updateGroundTruth(double timestamp) {
+    shared_ptr<mbot_base::TrackedObjectArray> tracks = std::make_shared<mbot_base::TrackedObjectArray>();
+    tracks->header.stamp = ros::Time(timestamp);
+    tracks->header.frame_id = world_frame;
+
 
     for (auto& actor : actors_) {
         client_mutex_.lock();
@@ -182,30 +180,30 @@ void MbotSim::updateGroundTruth() {
         Eigen::Quaterniond orientation = nwu_transform_.toNwu(pose.orientation.cast<double>());
         Eigen::Vector3d velocity = nwu_transform_.toNwu(twist.linear.cast<double>());
 
-        mbot_base::TrackedObject track;
-        track.header.stamp = ros::Time::now();
-        track.header.frame_id = world_frame;
-        track.id = std::hash<std::string>{}(actor);
-        track.position.x = position.x();
-        track.position.y = position.y();
-        track.position.z = position.z();
-        track.velocity.x = velocity.x();
-        track.velocity.y = velocity.y();
-        track.velocity.z = velocity.z();
-        track.yaw_rate = -twist.angular.z();
-        track.orientation = orientation.toRotationMatrix().eulerAngles(2, 1, 0)[0];
-        track.orientation_known = true;
+        shared_ptr<mbot_base::TrackedObject> track = std::make_shared<mbot_base::TrackedObject>();
+        track->header.stamp = ros::Time(timestamp);
+        track->header.frame_id = world_frame;
+        track->id = std::hash<std::string>{}(actor);
+        track->position.x = position.x();
+        track->position.y = position.y();
+        track->position.z = position.z();
+        track->velocity.x = velocity.x();
+        track->velocity.y = velocity.y();
+        track->velocity.z = velocity.z();
+        track->yaw_rate = -twist.angular.z();
+        track->orientation = orientation.toRotationMatrix().eulerAngles(2, 1, 0)[0];
+        track->orientation_known = true;
 
         if (actor.find("Pedestrian_") == 0) {
-            track.classification = "pedestrian";
-            track.radius = 0.25;
+            track->classification = "pedestrian";
+            track->radius = 0.25;
         }
         else {
-            track.classification = "vehicle";
-            track.radius = 1.5;
+            track->classification = "vehicle";
+            track->radius = 1.5;
         }
 
-        track.shape.height = 2.0;
+        track->shape.height = 2.0;
 
         // TODO This should be using geometry utils in marble_structs
         const int SHAPE_POINTS = 24;
@@ -213,16 +211,19 @@ void MbotSim::updateGroundTruth() {
             double theta = 2 * M_PI * i / SHAPE_POINTS;
 
             geometry_msgs::Point ros_pt;
-            ros_pt.x = track.position.x + track.radius * cos(theta);
-            ros_pt.y = track.position.y + track.radius * sin(theta);
-            ros_pt.z = track.position.z;
-            track.shape.footprint.push_back(ros_pt);
+            ros_pt.x = track->position.x + track->radius * cos(theta);
+            ros_pt.y = track->position.y + track->radius * sin(theta);
+            ros_pt.z = track->position.z;
+            track->shape.footprint.push_back(ros_pt);
         }
 
-        tracks.tracks.push_back(track);
+        tracks->tracks.push_back(*track);
     }
 
-    tracked_objects_pub_.publish(tracks);
+    array_to_publish.push_back(tracks);
+
+    // tracked_object_array.push_back(track);
+    // tracked_objects_pub_.publish(tracks);
 }
 
 void MbotSim::updateOdometry(Vehicle& vehicle, const msr::airlib::CarApiBase::CarState& state) {

@@ -1,10 +1,11 @@
 
 #pragma once
-
 #include <vector>
 #include <memory>
 #include <thread>
 #include <ros/ros.h>
+#include <mbot_base/TrackedObject.h>
+#include <mbot_base/TrackedObjectArray.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <vehicles/car/api/CarRpcLibClient.hpp>
 #include <tf2_ros/transform_broadcaster.h>
@@ -24,6 +25,10 @@ public:
 
     void step(double step_time);
 
+    vector<shared_ptr<mbot_base::TrackedObjectArray>> getTrackedObjectArray(){
+      return array_to_publish;
+    }
+
 private:
     struct Vehicle {
         std::string name;
@@ -37,7 +42,7 @@ private:
 
     void parseSettings();
 
-    void updateGroundTruth();
+    void updateGroundTruth(double timestamp);
 
     geometry_msgs::TransformStamped getSensorStaticTf(
       const std::string& vehicle_name,
@@ -56,6 +61,8 @@ private:
       const msr::airlib::CarApiBase::CarState& state);
 
     void updateImu(Vehicle& vehicle);
+
+    vector<shared_ptr<mbot_base::TrackedObjectArray>> array_to_publish;
 
     AirSimSettingsParser settings_parser_;
     ros::NodeHandle nh_;
