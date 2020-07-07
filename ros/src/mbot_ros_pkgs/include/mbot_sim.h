@@ -10,6 +10,7 @@
 #include <vehicles/car/api/CarRpcLibClient.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2_ros/static_transform_broadcaster.h>
+#include <std_msgs/Bool.h>
 #include "gps.h"
 #include "lidar.h"
 //#include "camera.h"
@@ -62,7 +63,10 @@ private:
 
     void updateImu(Vehicle& vehicle);
 
+    void start_recording_ground_truth(const std_msgs::Bool::ConstPtr& status); 
+
     vector<shared_ptr<mbot_base::TrackedObjectArray>> array_to_publish;
+    bool recording_ground_truth_data;
 
     AirSimSettingsParser settings_parser_;
     ros::NodeHandle nh_;
@@ -75,6 +79,7 @@ private:
     ros::Timer ground_truth_update_timer_;
     ros::Publisher tracked_objects_pub_;
     ros::Publisher clock_pub_;
+    ros::Subscriber start_recording_sub;
 
     std::shared_ptr<msr::airlib::CarRpcLibClient> airsim_client_;
     std::mutex client_mutex_;

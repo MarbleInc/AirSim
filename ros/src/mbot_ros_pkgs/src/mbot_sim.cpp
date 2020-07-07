@@ -30,8 +30,23 @@ void MbotSim::start() {
     // Get all actors we care to track in the scene
     actors_ = airsim_client_->simListSceneObjects("(Pedestrian|Vehicle)_.*");
 
+    start_recording_sub = nh_.subscribe("/record_gt_data", 1, &MbotSim::start_recording_ground_truth, this);
     tracked_objects_pub_ = nh_.advertise<mbot_base::TrackedObjectArray>("tracked_objects", 1);
     clock_pub_ = nh_.advertise<rosgraph_msgs::Clock>("/clock", 10);
+}
+
+void MbotSim::start_recording_ground_truth(const std_msgs::Bool::ConstPtr& status){
+    if(status->data && !recording_ground_truth_data){
+        // start recording ground truth data
+        recording_ground_truth_data = true;
+    }
+    else if(recording_ground_truth_data){
+        // stop recording ground truth data and write to disk
+        recording_ground_truth_data = false;
+        vector<shared_ptr<mbot_base::TrackedObjectArray>> arr = getTrackedObjectArray();
+
+        
+    }
 }
 
 void MbotSim::step(double step_time) {
@@ -220,7 +235,9 @@ void MbotSim::updateGroundTruth(double timestamp) {
         tracks->tracks.push_back(*track);
     }
 
-    array_to_publish.push_back(tracks);
+    if(recording_ground_truth_data){
+        array_to_publish.push_back(tracks);
+    }
 
     // tracked_object_array.push_back(track);
     // tracked_objects_pub_.publish(tracks);
