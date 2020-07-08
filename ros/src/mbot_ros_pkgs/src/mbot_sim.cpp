@@ -69,7 +69,7 @@ void MbotSim::step(double step_time) {
               sensor->tick(timestamp);
           }
 
-          updateGroundTruth(timestamp);
+        // updateGroundTruth(timestamp);
 
           // TODO send velocity commands to AirSim
       }
@@ -88,8 +88,7 @@ void MbotSim::step(double step_time) {
   airsim_client_->simContinueForTime(step_time);
 }
 
-void MbotSim::parseSettings() {
-    image_transport::ImageTransport image_transporter(nh_);
+void MbotSim::parseSettings() {image_transport::ImageTransport image_transporter(nh_);
 
     for (const auto& vehicle_map : AirSimSettings::singleton().vehicles) {
         auto& vehicle_name = vehicle_map.first;
@@ -184,8 +183,10 @@ void MbotSim::updateGroundTruth(double timestamp) {
     tracks->header.stamp = ros::Time(timestamp);
     tracks->header.frame_id = world_frame;
 
-
-    for (auto& actor : actors_) {
+    #pragma omp parallel
+    #pragma omp for
+    for (int i = 0; i < actors_.size(); i++) {
+        auto& actor = actors_[i];
         client_mutex_.lock();
         auto pose = airsim_client_->simGetObjectPose(actor);
         auto twist = airsim_client_->simGetObjectTwist(actor);

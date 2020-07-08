@@ -21,6 +21,12 @@ message(STATUS "found RPC_LIB_INCLUDES=${RPC_LIB_INCLUDES}")
 # find_package(Eigen3 REQUIRED)
 find_package(Boost REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(OpenMP REQUIRED)
+if(OPENMP_FOUND)
+  message(STATUS "OPENMP FOUND")
+  set(OpenMP_FLAGS ${OpenMP_CXX_FLAGS})  # or if you use C: ${OpenMP_C_FLAGS}
+  set(OpenMP_LIBS gomp)
+endif()
 
 find_package(catkin REQUIRED COMPONENTS
   cv_bridge
@@ -47,7 +53,8 @@ generate_messages(
 catkin_package(
   INCLUDE_DIRS include
   # LIBRARIES airsim_ros
-  CATKIN_DEPENDS message_runtime roscpp std_msgs # nodelet
+  CATKIN_DEPENDS message_runtime roscpp std_msgs  # nodelet
+  DEPENDS OpenMP
 )
 
 include_directories(
@@ -73,9 +80,13 @@ add_executable(mbot_sim_node
     src/mbot_sim.cpp
     src/mbot_sim_node.cpp
 )
+
+target_compile_options(mbot_sim_node PRIVATE ${OpenMP_FLAGS})
+add_dependencies(mbot_sim_node ${catkin_EXPORTED_TARGETS})
 target_link_libraries(mbot_sim_node
     airsim_settings_parser
     ${catkin_LIBRARIES}
+    ${OpenMP_LIBS}
     AirLib
 )
 
