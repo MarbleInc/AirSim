@@ -66,7 +66,7 @@ private:
     void start_recording_ground_truth(const std_msgs::Bool::ConstPtr& status); 
 
     vector<shared_ptr<mbot_base::TrackedObjectArray>> array_to_publish;
-    bool recording_ground_truth_data;
+    bool recording_ground_truth_data = false;
 
     AirSimSettingsParser settings_parser_;
     ros::NodeHandle nh_;

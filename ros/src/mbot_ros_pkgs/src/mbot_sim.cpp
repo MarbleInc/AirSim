@@ -30,12 +30,17 @@ void MbotSim::start() {
     // Get all actors we care to track in the scene
     actors_ = airsim_client_->simListSceneObjects("(Pedestrian|Vehicle)_.*");
 
-    start_recording_sub = nh_.subscribe("/record_gt_data", 1, &MbotSim::start_recording_ground_truth, this);
+    std::cout<<"Creating ground truth recorder"<<std::endl;
+
+    start_recording_sub = nh_.subscribe("/record_gt_data", 1000, &MbotSim::start_recording_ground_truth, this);
     tracked_objects_pub_ = nh_.advertise<mbot_base::TrackedObjectArray>("tracked_objects", 1);
     clock_pub_ = nh_.advertise<rosgraph_msgs::Clock>("/clock", 10);
 }
 
 void MbotSim::start_recording_ground_truth(const std_msgs::Bool::ConstPtr& status){
+    std::cout<<"Starting to write ground truth data"<<std::endl;
+    printf("status msg %d, recording_ground_truth_data %d\n", status->data, recording_ground_truth_data);
+
     if(status->data && !recording_ground_truth_data){
         // start recording ground truth data
         std::cout<<"Starting to write ground truth data"<<std::endl;
@@ -69,7 +74,7 @@ void MbotSim::step(double step_time) {
               sensor->tick(timestamp);
           }
 
-        // updateGroundTruth(timestamp);
+        updateGroundTruth(timestamp);
 
           // TODO send velocity commands to AirSim
       }
@@ -183,19 +188,31 @@ void MbotSim::updateGroundTruth(double timestamp) {
     tracks->header.stamp = ros::Time(timestamp);
     tracks->header.frame_id = world_frame;
 
-    #pragma omp parallel
-    #pragma omp for
+    vector<Pose> poses;
+    vector<Twist> twists;
     for (int i = 0; i < actors_.size(); i++) {
         auto& actor = actors_[i];
-        client_mutex_.lock();
         auto pose = airsim_client_->simGetObjectPose(actor);
         auto twist = airsim_client_->simGetObjectTwist(actor);
-        client_mutex_.unlock();
+        twists.push_back(twist);
+        poses.push_back(pose);
+    }
+        Eigen::Vector3d position = nwu_transform_.toNwu(poses[0].position.cast<double>());
+        Eigen::Quaterniond orientation = nwu_transform_.toNwu(poses[0].orientation.cast<double>());
+        Eigen::Vector3d velocity = nwu_transform_.toNwu(twists[0].linear.cast<double>());
+
+    #pragma omp parallel
+{
+   #pragma omp for
+    for (int i = 0; i < actors_.size(); i++) {
+        auto& actor = actors_[i];
+        // client_mutex_.lock();
+        auto pose = poses[i];//airsim_client_->simGetObjectPose(actor);
+        auto twist = twists[i];//airsim_client_->simGetObjectTwist(actor);
+        // client_mutex_.unlock();
 
         // Convert to NED to NWU
-        Eigen::Vector3d position = nwu_transform_.toNwu(pose.position.cast<double>());
-        Eigen::Quaterniond orientation = nwu_transform_.toNwu(pose.orientation.cast<double>());
-        Eigen::Vector3d velocity = nwu_transform_.toNwu(twist.linear.cast<double>());
+
 
         shared_ptr<mbot_base::TrackedObject> track = std::make_shared<mbot_base::TrackedObject>();
         track->header.stamp = ros::Time(timestamp);
@@ -236,6 +253,7 @@ void MbotSim::updateGroundTruth(double timestamp) {
 
         tracks->tracks.push_back(*track);
     }
+} 
 
     if(recording_ground_truth_data){
         std::cout<<"TrackedObjectArray for this timestamp pushed back"<<std::endl;

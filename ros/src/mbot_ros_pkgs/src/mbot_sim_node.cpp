@@ -12,6 +12,7 @@ int main(int argc, char** argv) {
     while (ros::ok()) {
         // Blocks for step duration
         mbot_sim.step(0.01);
+        ros::spinOnce();
     }
 
     return 0;
