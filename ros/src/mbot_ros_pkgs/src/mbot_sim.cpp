@@ -33,7 +33,7 @@ void MbotSim::start() {
     std::cout<<"Creating ground truth recorder"<<std::endl;
 
     start_recording_sub = nh_.subscribe("/record_gt_data", 1000, &MbotSim::start_recording_ground_truth, this);
-    tracked_objects_pub_ = nh_.advertise<mbot_base::TrackedObjectArray>("tracked_objects", 1);
+    // tracked_objects_pub_ = nh_.advertise<mbot_base::TrackedObjectArray>("tracked_objects", 1);
     clock_pub_ = nh_.advertise<rosgraph_msgs::Clock>("/clock", 10);
 }
 
@@ -187,9 +187,9 @@ void MbotSim::updateGroundTruth(double timestamp) {
     shared_ptr<mbot_base::TrackedObjectArray> tracks = std::make_shared<mbot_base::TrackedObjectArray>();
     tracks->header.stamp = ros::Time(timestamp);
     tracks->header.frame_id = world_frame;
-
     vector<Pose> poses;
     vector<Twist> twists;
+
     for (int i = 0; i < actors_.size(); i++) {
         auto& actor = actors_[i];
         auto pose = airsim_client_->simGetObjectPose(actor);
@@ -197,13 +197,8 @@ void MbotSim::updateGroundTruth(double timestamp) {
         twists.push_back(twist);
         poses.push_back(pose);
     }
-        Eigen::Vector3d position = nwu_transform_.toNwu(poses[0].position.cast<double>());
-        Eigen::Quaterniond orientation = nwu_transform_.toNwu(poses[0].orientation.cast<double>());
-        Eigen::Vector3d velocity = nwu_transform_.toNwu(twists[0].linear.cast<double>());
 
-    #pragma omp parallel
 {
-   #pragma omp for
     for (int i = 0; i < actors_.size(); i++) {
         auto& actor = actors_[i];
         // client_mutex_.lock();
@@ -212,6 +207,10 @@ void MbotSim::updateGroundTruth(double timestamp) {
         // client_mutex_.unlock();
 
         // Convert to NED to NWU
+        Eigen::Vector3d position = nwu_transform_.toNwu(pose.position.cast<double>());
+        Eigen::Quaterniond orientation = nwu_transform_.toNwu(pose.orientation.cast<double>());
+        Eigen::Vector3d velocity = nwu_transform_.toNwu(twist.linear.cast<double>());
+
 
 
         shared_ptr<mbot_base::TrackedObject> track = std::make_shared<mbot_base::TrackedObject>();

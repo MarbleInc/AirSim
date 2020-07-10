@@ -31,6 +31,8 @@ public:
     }
 
 private:
+
+    
     struct Vehicle {
         std::string name;
         std::vector<std::shared_ptr<Sensor>> sensors;
