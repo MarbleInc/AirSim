@@ -3,8 +3,6 @@
 #include <sensor_msgs/Imu.h>
 #include <nav_msgs/Odometry.h>
 #include <rosgraph_msgs/Clock.h>
-#include <mbot_base/TrackedObject.h>
-#include <mbot_base/TrackedObjectArray.h>
 #include <tf2_eigen/tf2_eigen.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/LinearMath/Quaternion.h>
@@ -12,7 +10,7 @@
 #include <image_transport/image_transport.h>
 #include "math_common.h"
 #include "airsim_client_factory.h"
-
+#include <ros/console.h>
 static std::string world_frame = "world";
 static std::string base_link_frame = "base_link";
 static std::string base_link_ned_frame = "base_link_ned";
@@ -33,8 +31,32 @@ void MbotSim::start() {
     // Get all actors we care to track in the scene
     actors_ = airsim_client_->simListSceneObjects("(Pedestrian|Vehicle)_.*");
 
-    tracked_objects_pub_ = nh_.advertise<mbot_base::TrackedObjectArray>("tracked_objects", 1);
+    start_recording_sub = nh_.subscribe("/record_gt_data", 1000, &MbotSim::start_recording_ground_truth, this);
+    tracked_objects_pub_ = nh_.advertise<mbot_base::TrackedObjectArray>("/tracked_objects_simulated", 1);
     clock_pub_ = nh_.advertise<rosgraph_msgs::Clock>("/clock", 10);
+}
+
+void MbotSim::start_recording_ground_truth(const std_msgs::Bool::ConstPtr& status){
+    ROS_INFO_STREAM("Starting to write ground truth data");
+
+    if(status->data && !recording_ground_truth_data){
+        // start recording ground truth data
+        ROS_INFO_STREAM("Starting to write ground truth data");
+        recording_ground_truth_data = true;
+    }
+    else if(recording_ground_truth_data){
+        // stop recording ground truth data and write to disk
+        recording_ground_truth_data = false;
+        vector<shared_ptr<mbot_base::TrackedObjectArray>> arr = getTrackedObjectArray();  
+        ROS_INFO_STREAM("Ending writing ground truth data, "<< arr.size()<< " timestamps recorded");
+
+        for(shared_ptr<mbot_base::TrackedObjectArray> timestamped_array: arr){
+            // publish the array
+            auto obj_arr = *(timestamped_array);
+            tracked_objects_pub_.publish(obj_arr);
+        }
+
+    }
 }
 
 void MbotSim::step(double step_time) {
@@ -56,14 +78,14 @@ void MbotSim::step(double step_time) {
               sensor->tick(timestamp);
           }
 
-          //updateGroundTruth();
+          updateGroundTruth(timestamp);
 
           // TODO send velocity commands to AirSim
       }
       catch (rpc::rpc_error& e)
       {
           std::string msg = e.get_error().as<std::string>();
-          std::cout << "Exception raised by the API:" << std::endl << msg << std::endl;
+          ROS_ERROR_STREAM("Exception raised by the API:"<< msg);
       }
   }
 
@@ -82,7 +104,7 @@ void MbotSim::parseSettings() {
         auto& vehicle_name = vehicle_map.first;
         auto& vehicle_setting = vehicle_map.second;
 
-        std::cout << "Processing vehicle: " << vehicle_name << std::endl;
+        ROS_INFO_STREAM("Processing vehicle: " << vehicle_name);
 
         // Create our vehicle wrapper
         Vehicle vehicle;
@@ -109,7 +131,7 @@ void MbotSim::parseSettings() {
 
                 // Skip capture settings that are missing a FOV setting
                 if (!std::isnan(capture_setting.fov_degrees)) {
-                    std::cout << "Adding camera " << camera_name << std::endl;
+                    ROS_INFO_STREAM("Adding camera " << camera_name);
                     capture_devices->addCamera(camera_name, capture_setting);
                     addCameraStaticTf(vehicle_name, camera_name, camera_setting);
                 }
@@ -123,7 +145,7 @@ void MbotSim::parseSettings() {
             auto& sensor_setting = sensor.second;
 
             if (sensor_setting->sensor_type == SensorBase::SensorType::Lidar) {
-                std::cout << "Adding lidar named: " << sensor_name << std::endl;
+                ROS_INFO_STREAM("Adding lidar named: " << sensor_name);
                 double update_lidar_every_n_sec;
                 nh_.getParam("update_lidar_every_n_sec", update_lidar_every_n_sec);
                 vehicle.sensors.push_back(std::make_shared<Lidar>(nh_, vehicle_name, sensor_name, update_lidar_every_n_sec));
@@ -132,13 +154,13 @@ void MbotSim::parseSettings() {
                 static_tfs_.push_back(static_tf);
             }
             else if (sensor_setting->sensor_type == SensorBase::SensorType::Gps) {
-                std::cout << "Adding GPS named: " << sensor_name << std::endl;
+                ROS_INFO_STREAM("Adding GPS named: " << sensor_name);
                 double update_gps_every_n_sec;
                 nh_.getParam("update_gps_every_n_sec", update_gps_every_n_sec);
                 vehicle.sensors.push_back(std::make_shared<Gps>(nh_, vehicle_name, sensor_name, update_gps_every_n_sec));
             }
             else if (sensor_setting->sensor_type == SensorBase::SensorType::Imu) {
-                std::cout << "Adding IMU named: " << sensor_name << std::endl;
+                ROS_INFO_STREAM("Adding IMU named: " << sensor_name);
                 vehicle.imu_name = sensor_name;
                 vehicle.imu_pub = nh_.advertise<sensor_msgs::Imu>(vehicle_name + "/imu", 10);
                 // The IMU has no position so assume it sits at base link with no RPY
@@ -166,46 +188,44 @@ void MbotSim::parseSettings() {
     }
 }
 
-void MbotSim::updateGroundTruth() {
-    mbot_base::TrackedObjectArray tracks;
-    tracks.header.stamp = ros::Time::now();
-    tracks.header.frame_id = world_frame;
+void MbotSim::updateGroundTruth(double timestamp) {
+    shared_ptr<mbot_base::TrackedObjectArray> tracks = std::make_shared<mbot_base::TrackedObjectArray>();
+    tracks->header.stamp = ros::Time(timestamp);
+    tracks->header.frame_id = world_frame;
 
     for (auto& actor : actors_) {
-        client_mutex_.lock();
         auto pose = airsim_client_->simGetObjectPose(actor);
         auto twist = airsim_client_->simGetObjectTwist(actor);
-        client_mutex_.unlock();
 
         // Convert to NED to NWU
         Eigen::Vector3d position = nwu_transform_.toNwu(pose.position.cast<double>());
         Eigen::Quaterniond orientation = nwu_transform_.toNwu(pose.orientation.cast<double>());
         Eigen::Vector3d velocity = nwu_transform_.toNwu(twist.linear.cast<double>());
 
-        mbot_base::TrackedObject track;
-        track.header.stamp = ros::Time::now();
-        track.header.frame_id = world_frame;
-        track.id = std::hash<std::string>{}(actor);
-        track.position.x = position.x();
-        track.position.y = position.y();
-        track.position.z = position.z();
-        track.velocity.x = velocity.x();
-        track.velocity.y = velocity.y();
-        track.velocity.z = velocity.z();
-        track.yaw_rate = -twist.angular.z();
-        track.orientation = orientation.toRotationMatrix().eulerAngles(2, 1, 0)[0];
-        track.orientation_known = true;
+        shared_ptr<mbot_base::TrackedObject> track = std::make_shared<mbot_base::TrackedObject>();
+        track->header.stamp = ros::Time::now();
+        track->header.frame_id = world_frame;
+        track->id = std::hash<std::string>{}(actor);
+        track->position.x = position.x();
+        track->position.y = position.y();
+        track->position.z = position.z();
+        track->velocity.x = velocity.x();
+        track->velocity.y = velocity.y();
+        track->velocity.z = velocity.z();
+        track->yaw_rate = -twist.angular.z();
+        track->orientation = orientation.toRotationMatrix().eulerAngles(2, 1, 0)[0];
+        track->orientation_known = true;
 
         if (actor.find("Pedestrian_") == 0) {
-            track.classification = "pedestrian";
-            track.radius = 0.25;
+            track->classification = "pedestrian";
+            track->radius = 0.25;
         }
         else {
-            track.classification = "vehicle";
-            track.radius = 1.5;
+            track->classification = "vehicle";
+            track->radius = 1.5;
         }
 
-        track.shape.height = 2.0;
+        track->shape.height = 2.0;
 
         // TODO This should be using geometry utils in marble_structs
         const int SHAPE_POINTS = 24;
@@ -213,16 +233,19 @@ void MbotSim::updateGroundTruth() {
             double theta = 2 * M_PI * i / SHAPE_POINTS;
 
             geometry_msgs::Point ros_pt;
-            ros_pt.x = track.position.x + track.radius * cos(theta);
-            ros_pt.y = track.position.y + track.radius * sin(theta);
-            ros_pt.z = track.position.z;
-            track.shape.footprint.push_back(ros_pt);
+            ros_pt.x = track->position.x + track->radius * cos(theta);
+            ros_pt.y = track->position.y + track->radius * sin(theta);
+            ros_pt.z = track->position.z;
+            track->shape.footprint.push_back(ros_pt);
         }
 
-        tracks.tracks.push_back(track);
+        tracks->tracks.push_back(*track);
     }
 
-    tracked_objects_pub_.publish(tracks);
+    if(recording_ground_truth_data){
+        ROS_INFO_STREAM("TrackedObjectArray for this timestamp pushed back");
+        array_to_publish.push_back(tracks);
+    }
 }
 
 void MbotSim::updateOdometry(Vehicle& vehicle, const msr::airlib::CarApiBase::CarState& state) {
@@ -294,7 +317,7 @@ void MbotSim::connectToAirSim() {
     }
     catch (rpc::rpc_error&  e) {
         std::string msg = e.get_error().as<std::string>();
-        std::cout << "Exception raised by the API, something went wrong." << std::endl << msg << std::endl;
+        ROS_ERROR_STREAM("Exception raised by the API, something went wrong."<< msg);
     }
 }
 

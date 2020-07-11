@@ -1,0 +1,70 @@
+{
+  "SeeDocsAt": "https://github.com/Microsoft/AirSim/blob/master/docs/settings.md",
+  "SettingsVersion": 0.5,
+  "SimMode": "Car",
+  "ViewMode": "NoDisplay",
+  "ClockSpeed": 0.344,
+  "PawnPaths": {
+      "DefaultCar": {"PawnBP": "Class'/Game/VehicleVarietyPack/Blueprints/Pickup/BP_Pickup.BP_Pickup_C'"}
+   },
+   "Vehicles": {
+       "Surrogate": {
+           "VehicleType": "PhysXCar",
+           "Sensors": {
+               "Gps": {
+                   "SensorType": 3,
+                   "Enabled": true
+               },
+               "Imu": {
+                   "SensorType": 2,
+                   "Enabled" : true
+               },
+               "Lidar_1": {
+                   "SensorType": 6,
+                    "Enabled": true,
+                    "NumberOfChannels": 16,
+                    "PointsPerSecond": 100000,
+                    "RotationsPerSecond": 10,
+                    "Range": 100,
+                    "X": 0.9, 
+                    "Y": -1.0, 
+                    "Z": -2.0,
+                    "Roll": 173, 
+                    "Pitch": -18, 
+                    "Yaw" : -40,
+                    "VerticalFOVUpper": 15,
+                    "VerticalFOVLower": -15,
+                    "HorizontalFOVStart": -90,
+                    "HorizontalFOVEnd": 90,
+                    "DrawDebugPoints": false,
+                    "DataFrame": "SensorLocalFrame"
+               },
+               "Lidar_2": {
+                   "SensorType": 6,
+                    "Enabled": true,
+                    "NumberOfChannels": 16,
+                    "PointsPerSecond": 100000,
+                    "RotationsPerSecond": 10,
+                    "Range": 100,
+                    "X": 0.9, 
+                    "Y": 1.0, 
+                    "Z": -2.0,
+                    "Roll": 187, 
+                    "Pitch": -18, 
+                    "Yaw" : 40,
+                    "VerticalFOVUpper": 15,
+                    "VerticalFOVLower": -15,
+                    "HorizontalFOVStart": 90,
+                    "HorizontalFOVEnd": 90,
+                    "DrawDebugPoints": false,
+                    "DataFrame": "SensorLocalFrame"
+               }
+           },
+           "X": 0,
+           "Y": 0,
+           "Z": 0
+       }
+   }
+}
+
+

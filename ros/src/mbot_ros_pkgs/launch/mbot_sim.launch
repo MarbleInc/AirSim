@@ -3,6 +3,8 @@
 
 	<param name="/use_sim_time" value="true" />
 
+  <param name="ground_truth_dirname" type="string" value="ground_truth_dir" />
+
 	<rosparam param="/mbot_sim_node/Surrogate/front/Scene/disable_pub_plugins">
     - 'image_transport/compressedDepth'
     - 'image_transport/compressed'
@@ -32,6 +34,10 @@
     - 'image_transport/compressed'
     - 'image_transport/theora'
   </rosparam>
+
+
+
+  <node pkg="mbot_ros_pkgs" name="json_writer" type="json_writer.py" output="screen"> </node>
 
 	<node name="mbot_sim_node" pkg="mbot_ros_pkgs" type="mbot_sim_node" output="screen">
 		<param name="update_img_response_every_n_sec" type="double" value="0.2" />
